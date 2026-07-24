@@ -68,9 +68,13 @@ router.get("/", requireAuth, async (req, res) => {
   res.json({ tasks: await attachExtras(rows) });
 });
 
-// Create task - admin only
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
-  const { title, description, assignedTo, dueDate } = req.body || {};
+// Create task - admin can assign to anyone; an employee can only add work for themself
+router.post("/", requireAuth, async (req, res) => {
+  const { title, description, dueDate } = req.body || {};
+  let { assignedTo } = req.body || {};
+  if (req.user.role !== "admin") {
+    assignedTo = req.user.id; // employees can only log work under their own name
+  }
   if (!title || !assignedTo) return res.status(400).json({ error: "શીર્ષક અને કર્મચારી જરૂરી છે." });
   const { rows } = await pool.query(
     `INSERT INTO tasks (title, description, assigned_to, created_by, due_date)
