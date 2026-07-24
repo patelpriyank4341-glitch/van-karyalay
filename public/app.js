@@ -123,7 +123,10 @@ function taskListHtml(tasks, { showEmployee = true } = {}) {
       <tr class="task-row" data-task-id="${t.id}">
         <td class="title-cell" style="border-left-color:${STATUS_META[t.status].color}">
           <div style="font-weight:500;">${escapeHtml(t.title)}</div>
-          ${t.attachments.length ? `<div class="att-count">${ICON.paperclip}${t.attachments.length}</div>` : ""}
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${t.created_by === t.assigned_to ? '<span style="font-size:.68rem;color:var(--moss);">જાતે ઉમેર્યું</span>' : ""}
+            ${t.attachments.length ? `<div class="att-count">${ICON.paperclip}${t.attachments.length}</div>` : ""}
+          </div>
         </td>
         ${showEmployee ? `<td style="color:#5B5344;">${escapeHtml(t.assignee_name || "—")}</td>` : ""}
         <td class="mono" style="color:${overdue ? "var(--rust)" : "#5B5344"}">
@@ -291,7 +294,10 @@ function renderMyTasks() {
           <p style="font-size:.9rem;color:#7A7160;margin-top:.4rem;">તમને સોંપાયેલા કુલ ${mine.length} કાર્યોમાંથી ${counts.completed} પૂર્ણ થયા છે.</p>
         </div>
       </div>
-      ${taskListHtml(mine, { showEmployee: false })}
+      <div>
+        <button class="btn btn-primary" id="add-own-task-btn" style="display:flex;align-items:center;gap:6px;margin-bottom:.75rem;">${ICON.plus}મારું કામ ઉમેરો</button>
+        ${taskListHtml(mine, { showEmployee: false })}
+      </div>
     </div>`;
 }
 
@@ -338,6 +344,7 @@ function renderTaskModal(task) {
           <span style="display:flex;align-items:center;gap:4px;">${ICON.calendar}સોંપ્યું: ${fmtDate(task.assigned_date)}</span>
           <span style="display:flex;align-items:center;gap:4px;">${ICON.clock}નિયત: ${fmtDate(task.due_date)}</span>
           <span class="pill ${task.status}">${STATUS_META[task.status].label}</span>
+          ${task.created_by === task.assigned_to ? '<span style="font-size:.75rem;color:var(--moss);font-weight:600;">કર્મચારીએ જાતે ઉમેર્યું</span>' : ""}
         </div>
         ${task.description ? `<p style="font-size:.9rem;margin-bottom:1rem;">${escapeHtml(task.description)}</p>` : ""}
         <div class="status-row">${statusButtons}</div>
@@ -368,22 +375,22 @@ function renderTaskModal(task) {
     </div>`;
 }
 
-function renderTaskFormModal() {
+function renderTaskFormModal(isSelf) {
   const empOpts = state.employees.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
   return `
     <div class="modal-overlay" id="form-modal-overlay">
       <div class="modal" id="form-modal">
-        <div class="modal-head"><h3>નવું કાર્ય સોંપો</h3><button class="modal-close" id="close-form-modal">${ICON.x}</button></div>
+        <div class="modal-head"><h3>${isSelf ? "મારું કામ ઉમેરો" : "નવું કાર્ય સોંપો"}</h3><button class="modal-close" id="close-form-modal">${ICON.x}</button></div>
         <form id="new-task-form">
           <div class="field"><label>કાર્યનું શીર્ષક</label><input class="input" id="nt-title" required /></div>
           <div class="field"><label>વિગત</label><textarea class="input" id="nt-desc" rows="3"></textarea></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-            <div class="field"><label>કર્મચારી</label><select class="input" id="nt-emp">${empOpts}</select></div>
+          <div style="display:grid;grid-template-columns:${isSelf ? "1fr" : "1fr 1fr"};gap:12px;">
+            ${isSelf ? "" : `<div class="field"><label>કર્મચારી</label><select class="input" id="nt-emp">${empOpts}</select></div>`}
             <div class="field"><label>નિયત તારીખ</label><input type="date" class="input" id="nt-due" value="${todayISO()}" /></div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:.5rem;">
             <button type="button" class="btn btn-ghost" id="cancel-new-task">રદ કરો</button>
-            <button type="submit" class="btn btn-primary">કાર્ય સોંપો</button>
+            <button type="submit" class="btn btn-primary">${isSelf ? "ઉમેરો" : "કાર્ય સોંપો"}</button>
           </div>
         </form>
       </div>
@@ -428,6 +435,9 @@ function render() {
   if (state.view === "tasks") bindTasksEvents();
   if (state.view === "team") bindTeamEvents();
   if (state.view === "reports") bindReportsEvents();
+  if (state.user.role !== "admin") {
+    document.getElementById("add-own-task-btn").onclick = () => { state.showNewTaskForm = true; renderModal(); };
+  }
 
   renderModal();
 }
@@ -438,7 +448,7 @@ function renderModal() {
     const task = findTask(state.activeTaskId);
     if (task) { root.innerHTML = renderTaskModal(task); bindTaskModalEvents(task); return; }
   }
-  if (state.showNewTaskForm) { root.innerHTML = renderTaskFormModal(); bindTaskFormEvents(); return; }
+  if (state.showNewTaskForm) { root.innerHTML = renderTaskFormModal(state.user.role !== "admin"); bindTaskFormEvents(); return; }
   if (state.editingEmpId !== undefined && state.editingEmpId !== null) {
     const emp = state.editingEmpId === "new" ? null : findEmp(state.editingEmpId);
     root.innerHTML = renderEmpFormModal(emp); bindEmpFormEvents(emp); return;
@@ -535,7 +545,8 @@ function bindTaskFormEvents() {
     e.preventDefault();
     const title = document.getElementById("nt-title").value.trim();
     const description = document.getElementById("nt-desc").value.trim();
-    const assignedTo = document.getElementById("nt-emp").value;
+    const empField = document.getElementById("nt-emp");
+    const assignedTo = empField ? empField.value : state.user.id;
     const dueDate = document.getElementById("nt-due").value;
     if (!title || !assignedTo) return;
     const { task } = await api("/tasks", { method: "POST", body: JSON.stringify({ title, description, assignedTo, dueDate }) });
